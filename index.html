@@ -12,6 +12,10 @@
         .container { max-width: 1100px; margin: auto; padding: 70px 20px; }
         .card { background: var(--card); border: 1px solid #1a2634; padding: 20px; border-radius: 12px; margin-bottom: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.3); }
         
+        /* Modal Style */
+        #ai-modal-box { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 320px; background: var(--menu); border: 2px solid var(--blue); padding: 20px; border-radius: 15px; z-index: 2000; text-align: center; }
+        .modal-bg { position: fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:1999; }
+
         .dots-menu-container { position: fixed; top: 20px; left: 20px; z-index: 1001; }
         .dots-btn { font-size: 24px; cursor: pointer; color: var(--blue); background: rgba(0,180,216,0.1); border: 1px solid var(--blue); padding: 5px 15px; border-radius: 8px; }
         .dropdown-content { position: absolute; top: 50px; left: 0; width: 250px; background: var(--menu); border: 1px solid #333; border-radius: 8px; display: none; flex-direction: column; }
@@ -40,11 +44,21 @@
 </head>
 <body>
 
+<div id="ai-modal-container" class="hidden">
+    <div class="modal-bg" onclick="closeAI()"></div>
+    <div id="ai-modal-box">
+        <h3 style="color:var(--blue); margin-top:0;">🤖 NOVA AI</h3>
+        <p id="ai-modal-msg" style="font-size: 0.9rem; line-height: 1.5;"></p>
+        <button class="btn-blue" onclick="closeAI()">OK</button>
+    </div>
+</div>
+
 <div class="dots-menu-container">
     <div class="dots-btn" onclick="toggleDropdown()">⋮ Settings</div>
     <div id="dots-dropdown" class="dropdown-content">
         <div class="menu-item" onclick="showPanel('trade-panel')">📈 Market (வர்த்தகம்)</div>
         <div class="menu-item" onclick="showPanel('finance-panel')">📊 Finance (நிதி நிலை)</div>
+        <div class="menu-item" onclick="openAIChat()">🤖 AI Chat (AI-யுடன் பேச)</div>
         <div class="menu-item" onclick="runAI()">🤖 AI Analysis (கணிப்பு)</div>
         <div class="menu-item" onclick="showPanel('history-panel')">📜 History (வரலாறு)</div>
         <div id="admin-only-1" class="menu-item hidden" onclick="showPanel('user-create')">👤 Add User (புதிய பயனர்)</div>
@@ -177,6 +191,23 @@ let tradeHistoryArray = [];
 let currentUser = localStorage.getItem('nova_user');
 let financeChart;
 
+// --- Custom AI Modal Logic (Replaces Alert) ---
+window.showAI = (msg) => {
+    document.getElementById('ai-modal-msg').innerText = msg;
+    document.getElementById('ai-modal-container').classList.remove('hidden');
+};
+window.closeAI = () => document.getElementById('ai-modal-container').classList.add('hidden');
+
+// --- AI Chat Logic ---
+window.openAIChat = () => {
+    const chatInput = prompt("AI-யிடம் உங்கள் கேள்வியைக் கேளுங்கள்:");
+    if (!chatInput) return;
+    let reply = "மன்னிக்கவும், இது குறித்த தரவு என்னிடம் இல்லை.";
+    if (chatInput.includes("Market")) reply = isMarketOpen ? "தற்போது சந்தை சீராக இயங்குகிறது." : "சந்தை தற்போது மூடப்பட்டுள்ளது.";
+    if (chatInput.includes("வணக்கம்")) reply = "வணக்கம்! நான் NOVA AI. உங்களுக்கு எப்படி உதவ முடியும்?";
+    showAI(`பதில்: ${reply}`);
+};
+
 // --- AI Analysis Logic ---
 window.runAI = () => {
     const u = users[currentUser];
@@ -184,7 +215,7 @@ window.runAI = () => {
     const pnl = u.avgPrice > 0 ? ((marketPrice - u.avgPrice) / u.avgPrice) * 100 : 0;
     let advice = marketPrice < 150 ? "BUY (வாங்கலாம் - விலை குறைவாக உள்ளது)" : "HOLD (காத்திருக்கவும்)";
     if(pnl > 10) advice = "SELL (விற்கலாம் - லாபத்தில் உள்ளீர்கள்)";
-    alert(`🤖 NOVA AI Analysis:\n\nசந்தை விலை: Rs.${marketPrice.toFixed(2)}\nஉங்கள் லாப/நஷ்டம்: ${pnl.toFixed(2)}%\n\nபரிந்துரை: ${advice}`);
+    showAI(`🤖 NOVA AI Analysis:\n\nசந்தை விலை: Rs.${marketPrice.toFixed(2)}\nஉங்கள் லாப/நஷ்டம்: ${pnl.toFixed(2)}%\n\nபரிந்துரை: ${advice}`);
 };
 
 onValue(ref(db, 'nova_pro'), (snap) => {
@@ -205,31 +236,32 @@ function checkWeekend() {
 }
 
 window.handleTrade = (type) => {
-    if (checkWeekend()) return alert("வார இறுதி விடுமுறை!");
-    if (!isMarketOpen) return alert("சந்தை மூடப்பட்டுள்ளது!");
+    if (checkWeekend()) return showAI("வார இறுதி விடுமுறை!");
+    if (!isMarketOpen) return showAI("சந்தை மூடப்பட்டுள்ளது!");
     
     const qtyInput = document.getElementById('trade-qty');
     const qty = parseFloat(qtyInput.value);
     const u = users[currentUser];
-    if (!qty || qty <= 0) return alert("சரியான எண்ணிக்கையை உள்ளிடவும்!");
+    if (!qty || qty <= 0) return showAI("சரியான எண்ணிக்கையை உள்ளிடவும்!");
 
     const totalVal = qty * marketPrice;
     let fee = 0;
 
     if (type === 'BUY') {
-        if (u.balance < totalVal) return alert("பணம் போதவில்லை!");
+        if (u.balance < totalVal) return showAI("பணம் போதவில்லை!");
         u.avgPrice = (((u.avgPrice || 0) * (u.coins || 0)) + totalVal) / ((u.coins || 0) + qty);
         u.balance -= totalVal;
         u.coins = (u.coins || 0) + qty;
-        updateMarketImpact(0.1 * qty);
+        // Admin trade logic: Price won't change if admin trades
+        if(currentUser !== "@NOVA0824") updateMarketImpact(0.1 * qty);
     } else {
-        if (u.coins < qty) return alert("நாணயங்கள் போதவில்லை!");
+        if (u.coins < qty) return showAI("நாணயங்கள் போதவில்லை!");
         fee = totalVal * 0.015;
         const netAmount = totalVal - fee;
         u.balance += netAmount;
         u.coins -= qty;
         platformFees += fee;
-        updateMarketImpact(-0.1 * qty);
+        if(currentUser !== "@NOVA0824") updateMarketImpact(-0.1 * qty);
     }
 
     const tradeData = {
@@ -241,7 +273,7 @@ window.handleTrade = (type) => {
     saveUser(currentUser, u);
     update(ref(db, 'nova_pro'), { fees: platformFees });
     qtyInput.value = "";
-    alert(`${type} வெற்றி!`);
+    showAI(`${type} வெற்றி!`);
 };
 
 function renderUI() {
@@ -333,7 +365,7 @@ function initChart(invest, current) {
 }
 
 window.downloadCSV = () => {
-    if (tradeHistoryArray.length === 0) return alert("தகவல்கள் இல்லை!");
+    if (tradeHistoryArray.length === 0) return showAI("தகவல்கள் இல்லை!");
     let csv = "Date,Type,Qty,Price,Fee,Total\n";
     tradeHistoryArray.forEach(h => { csv += `${h.time},${h.type},${h.qty},${h.price},${h.fee},${h.total}\n`; });
     const blob = new Blob([csv], { type: 'text/csv' });
@@ -346,11 +378,20 @@ window.login = () => {
     const pass = document.getElementById('login-pass').value.trim();
     if (id === "@NOVA0824" && pass === "Dinu0530") {
         currentUser = id; localStorage.setItem('nova_user', id);
-        if(!users[id]) saveUser(id, { name: "Admin", balance: 0, coins: 0, avgPrice: 0, pass: "Dinu0530" });
+        if(!users[id]) saveUser(id, { 
+            name: "Thiraviyanathan Ajeepan", 
+            dob: "2004.06.15", 
+            age: 21,
+            acc: "NO/IN/08241103",
+            balance: 0, 
+            coins: 0, 
+            avgPrice: 0, 
+            pass: "Dinu0530" 
+        });
         renderUI();
     } else if (users[id] && users[id].pass === pass) {
         currentUser = id; localStorage.setItem('nova_user', id); renderUI();
-    } else { alert("தவறான விவரங்கள்!"); }
+    } else { showAI("தவறான விவரங்கள்!"); }
 };
 
 window.registerUser = () => {
@@ -363,7 +404,7 @@ window.registerUser = () => {
         phone: document.getElementById('reg-phone').value,
         balance: 0, coins: 0, avgPrice: 0
     };
-    saveUser(id, newUser); alert("பயனர் பதிவு செய்யப்பட்டது!");
+    saveUser(id, newUser); showAI("பயனர் பதிவு செய்யப்பட்டது!");
 };
 
 window.adminFund = (id, type) => {
