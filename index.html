@@ -143,6 +143,12 @@
                 <button class="btn-blue" onclick="updateMarketPriceManual()">விலையை மாற்று</button>
             </div>
 
+            <div class="card">
+                <h3>🔍 பயனர் தேடல் & விவரங்கள்</h3>
+                <input type="text" id="user-search" placeholder="பெயர் அல்லது கணக்கு எண் மூலம் தேடுக..." onkeyup="searchUser()">
+                <div id="search-result" class="hidden" style="background: #080f16; padding: 15px; border-radius: 8px; border: 1px solid var(--blue); margin-top: 10px;"></div>
+            </div>
+
             <div class="card" style="overflow-x:auto;">
                 <h3>👥 பயனர் மேலாண்மை</h3>
                 <table id="user-table">
@@ -175,6 +181,13 @@ let platformFees = 0;
 let tradeHistoryArray = [];
 let currentUser = localStorage.getItem('nova_user');
 let financeChart;
+
+// LIVE CLOCK
+setInterval(() => {
+    const now = new Date();
+    const clock = document.getElementById('live-clock');
+    if(clock) clock.innerText = now.toLocaleTimeString();
+}, 1000);
 
 window.runAI = () => {
     const u = users[currentUser];
@@ -219,7 +232,6 @@ window.handleTrade = (type) => {
         u.avgPrice = (((u.avgPrice || 0) * (u.coins || 0)) + totalVal) / ((u.coins || 0) + qty);
         u.balance -= totalVal;
         u.coins = (u.coins || 0) + qty;
-        // Admin வர்த்தகம் செய்தால் விலை மாறாது
         if(currentUser !== "@NOVA0824") updateMarketImpact(0.1 * qty);
     } else {
         if (u.coins < qty) return alert("நாணயங்கள் போதவில்லை!");
@@ -228,7 +240,6 @@ window.handleTrade = (type) => {
         u.balance += netAmount;
         u.coins -= qty;
         platformFees += fee;
-        // Admin வர்த்தகம் செய்தால் விலை மாறாது
         if(currentUser !== "@NOVA0824") updateMarketImpact(-0.1 * qty);
     }
 
@@ -288,6 +299,49 @@ function renderUI() {
     });
 }
 
+// ADMIN FUNCTIONS
+window.deleteUser = (id) => {
+    if (id === "@NOVA0824") return alert("நிர்வாகியை நீக்க முடியாது!");
+    if (confirm(`நிச்சயமாக இந்த பயனரை (${id}) நீக்க விரும்புகிறீர்களா?`)) {
+        set(ref(db, `nova_pro/users/${id.replace(/\./g, ',')}`), null);
+        alert("பயனர் நீக்கப்பட்டார்!");
+    }
+};
+
+window.searchUser = () => {
+    const query = document.getElementById('user-search').value.toLowerCase();
+    const resultDiv = document.getElementById('search-result');
+    if (!query) return resultDiv.classList.add('hidden');
+
+    let html = ""; let found = false;
+    for (let id in users) {
+        const u = users[id];
+        if (u.name.toLowerCase().includes(query) || (u.acc && u.acc.toLowerCase().includes(query))) {
+            found = true;
+            html += `<div style="padding:10px; border-bottom:1px solid #222;">
+                <p><b>பெயர்:</b> ${u.name} (${u.acc})</p>
+                <p><b>Wallet:</b> Rs.${u.balance.toFixed(2)} | <b>Coins:</b> ${u.coins}</p>
+                <p><b>Avg Buy:</b> Rs.${u.avgPrice.toFixed(2)}</p>
+                <button onclick="deleteUser('${id}')" style="background:red; width:auto; font-size:10px; padding:5px;">DELETE USER</button>
+            </div>`;
+        }
+    }
+    resultDiv.innerHTML = found ? html : "பயனர் இல்லை.";
+    resultDiv.classList.remove('hidden');
+};
+
+function renderAdminTable() {
+    let html = "";
+    for (let id in users) {
+        html += `<tr><td>${users[id].name}</td><td>${users[id].acc || '-'}</td><td>${(users[id].balance || 0).toFixed(0)}</td><td>${(users[id].coins || 0)}</td>
+        <td><button onclick="adminFund('${id}', 'ADD')" style="background:green; padding:4px; width:30px;">+</button>
+        <button onclick="adminFund('${id}', 'SUB')" style="background:red; padding:4px; width:30px;">-</button>
+        <button onclick="deleteUser('${id}')" style="background:#555; padding:4px; width:30px;">🗑️</button></td></tr>`;
+    }
+    document.getElementById('user-list-body').innerHTML = html;
+}
+
+// REST OF THE ORIGINAL FUNCTIONS
 function updateFinanceData() {
     if(!currentUser || !users[currentUser]) return;
     const u = users[currentUser];
@@ -299,12 +353,13 @@ function updateFinanceData() {
     document.getElementById('f-invest').innerText = `Rs. ${investVal.toFixed(2)}`;
     document.getElementById('f-current').innerText = `Rs. ${coinVal.toFixed(2)}`;
     document.getElementById('f-pnl').innerText = `Rs. ${netPnl.toFixed(2)}`;
-    document.getElementById('f-pnl').style.color = netPnl >= 0 ? "var(--green)" : "var(--red)";
+    if(document.getElementById('f-pnl')) document.getElementById('f-pnl').style.color = netPnl >= 0 ? "var(--green)" : "var(--red)";
     
-    document.getElementById('td-wallet').innerText = `Rs. ${(u.balance || 0).toFixed(2)}`;
-    document.getElementById('td-coins').innerText = `Rs. ${coinVal.toFixed(2)}`;
-    document.getElementById('td-total').innerText = `Rs. ${totalAsset.toFixed(2)}`;
-
+    if(document.getElementById('td-wallet')){
+        document.getElementById('td-wallet').innerText = `Rs. ${(u.balance || 0).toFixed(2)}`;
+        document.getElementById('td-coins').innerText = `Rs. ${coinVal.toFixed(2)}`;
+        document.getElementById('td-total').innerText = `Rs. ${totalAsset.toFixed(2)}`;
+    }
     initChart(investVal, coinVal);
 }
 
@@ -355,11 +410,8 @@ window.login = () => {
 
 window.registerUser = () => {
     const id = document.getElementById('reg-id').value.trim();
-    
-    // தானாக ஏறும் கணக்கு எண் உருவாக்கம்
     const userCount = Object.keys(users).length;
     const newAccNo = `NO/IN/0824${(1103 + userCount).toString().padStart(4, '0')}`;
-
     const newUser = {
         name: document.getElementById('reg-name').value,
         dob: document.getElementById('reg-dob').value,
@@ -378,16 +430,6 @@ window.adminFund = (id, type) => {
     else users[id].balance -= amt;
     saveUser(id, users[id]);
 };
-
-function renderAdminTable() {
-    let html = "";
-    for (let id in users) {
-        html += `<tr><td>${users[id].name}</td><td>${users[id].acc || '-'}</td><td>${(users[id].balance || 0).toFixed(0)}</td><td>${(users[id].coins || 0)}</td>
-        <td><button onclick="adminFund('${id}', 'ADD')" style="background:green; padding:4px; width:30px;">+</button>
-        <button onclick="adminFund('${id}', 'SUB')" style="background:red; padding:4px; width:30px;">-</button></td></tr>`;
-    }
-    document.getElementById('user-list-body').innerHTML = html;
-}
 
 window.updateMarketPriceManual = () => {
     const p = parseFloat(document.getElementById('new-price-val').value);
@@ -411,8 +453,6 @@ window.showPanel = (id) => {
     if(id === 'finance-panel') updateFinanceData();
 };
 window.toggleDropdown = () => document.getElementById('dots-dropdown').classList.toggle('show');
-setInterval(() => { document.getElementById('live-clock').innerText = new Date().toLocaleTimeString(); }, 1000);
-if (currentUser) renderUI();
 </script>
 </body>
 </html>
