@@ -131,18 +131,6 @@
         </div>
 
         <div id="admin-control" class="panel hidden">
-            <div class="card" style="border: 1px solid var(--orange);">
-                <h3>🌍 ஒட்டுமொத்த தளம் புள்ளிவிவரங்கள்</h3>
-                <div class="stats-grid">
-                    <div class="stat-box"><small>மொத்த மூலதனம்</small><div id="total-site-invest" style="color:var(--blue)">Rs. 0</div></div>
-                    <div class="stat-box"><small>மொத்த வாலட் இருப்பு</small><div id="total-site-wallet" style="color:var(--green)">Rs. 0</div></div>
-                    <div class="stat-box"><small>மொத்த நாணயங்கள்</small><div id="total-site-coins" style="color:var(--orange)">0</div></div>
-                </div>
-                <div class="chart-container">
-                    <canvas id="adminMasterChart"></canvas>
-                </div>
-            </div>
-
             <div class="card">
                 <h3 style="color:var(--orange)">💰 வசூலிக்கப்பட்ட கட்டணம்: Rs. <span id="total-fees">0</span></h3>
                 <hr style="border:0.5px solid #222; margin:15px 0;">
@@ -188,7 +176,6 @@ let platformFees = 0;
 let tradeHistoryArray = [];
 let currentUser = localStorage.getItem('nova_user');
 let financeChart;
-let adminMasterChart;
 
 // --- AI Analysis Logic ---
 window.runAI = () => {
@@ -345,30 +332,6 @@ function initChart(invest, current) {
     });
 }
 
-function initAdminMasterChart(invest, wallet) {
-    const canvas = document.getElementById('adminMasterChart');
-    if(!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (adminMasterChart) adminMasterChart.destroy();
-    adminMasterChart = new Chart(ctx, {
-        type: 'doughnut',
-        data: {
-            labels: ['மொத்த முதலீடு', 'வாலட் இருப்பு'],
-            datasets: [{
-                data: [invest, wallet],
-                backgroundColor: ['#f39c12', '#00ff41'],
-                borderColor: '#0b141d',
-                borderWidth: 5
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: { legend: { position: 'bottom', labels: { color: '#fff' } } }
-        }
-    });
-}
-
 window.downloadCSV = () => {
     if (tradeHistoryArray.length === 0) return alert("தகவல்கள் இல்லை!");
     let csv = "Date,Type,Qty,Price,Fee,Total\n";
@@ -413,9 +376,38 @@ window.adminFund = (id, type) => {
 
 function renderAdminTable() {
     let html = "";
-    let siteTotalInvest = 0;
-    let siteTotalWallet = 0;
-    let siteTotalCoins = 0;
-
     for (let id in users) {
-        siteTotalInvest += (users[id].coins || 0) * (us
+        html += `<tr><td>${users[id].name}</td><td>${(users[id].balance || 0).toFixed(0)}</td><td>${(users[id].coins || 0)}</td>
+        <td><button onclick="adminFund('${id}', 'ADD')" style="background:green; padding:4px; width:30px;">+</button>
+        <button onclick="adminFund('${id}', 'SUB')" style="background:red; padding:4px; width:30px;">-</button></td></tr>`;
+    }
+    document.getElementById('user-list-body').innerHTML = html;
+}
+
+window.updateMarketPriceManual = () => {
+    const p = parseFloat(document.getElementById('new-price-val').value);
+    if(!isNaN(p)) update(ref(db, 'nova_pro'), { price: p });
+};
+
+window.setMarketStatus = (status) => update(ref(db, 'nova_pro'), { isOpen: status });
+
+function updateMarketImpact(impact) {
+    let newP = marketPrice + impact;
+    if (newP < 0.1) newP = 0.1;
+    update(ref(db, 'nova_pro'), { price: parseFloat(newP.toFixed(2)) });
+}
+
+window.saveUser = (id, data) => set(ref(db, `nova_pro/users/${id.replace(/\./g, ',')}`), data);
+window.logout = () => { localStorage.clear(); location.reload(); };
+window.showPanel = (id) => { 
+    document.querySelectorAll('.panel').forEach(p => p.classList.add('hidden')); 
+    document.getElementById(id).classList.remove('hidden'); 
+    document.getElementById('dots-dropdown').classList.remove('show');
+    if(id === 'finance-panel') updateFinanceData();
+};
+window.toggleDropdown = () => document.getElementById('dots-dropdown').classList.toggle('show');
+setInterval(() => { document.getElementById('live-clock').innerText = new Date().toLocaleTimeString(); }, 1000);
+if (currentUser) renderUI();
+</script>
+</body>
+</html>
