@@ -67,6 +67,9 @@
             <div id="market-status" style="font-size: 0.7rem; font-weight: bold;"></div>
             <div id="live-clock" style="color: #555; font-size: 0.8rem; margin: 5px 0;">00:00:00</div>
             <h1 id="live-price" style="color: var(--blue); font-size: 3rem; margin: 5px 0;">Rs. 0.00</h1>
+            <div style="height: 150px; width: 100%;">
+                <canvas id="livePriceChart"></canvas>
+            </div>
         </div>
 
         <div id="trade-panel" class="panel">
@@ -131,6 +134,18 @@
         </div>
 
         <div id="admin-control" class="panel hidden">
+            <div class="card" style="border: 1px solid var(--blue);">
+                <h3>🌍 ஒட்டுமொத்த தளம் புள்ளிவிவரங்கள்</h3>
+                <div class="stats-grid">
+                    <div class="stat-box"><small>மொத்த மூலதனம்</small><div id="total-site-invest" style="color:var(--blue)">Rs. 0</div></div>
+                    <div class="stat-box"><small>மொத்த வாலட் இருப்பு</small><div id="total-site-wallet" style="color:var(--green)">Rs. 0</div></div>
+                    <div class="stat-box"><small>மொத்த நாணயங்கள்</small><div id="total-site-coins" style="color:var(--orange)">0</div></div>
+                </div>
+                <div class="chart-container">
+                    <canvas id="adminMasterChart"></canvas>
+                </div>
+            </div>
+
             <div class="card">
                 <h3 style="color:var(--orange)">💰 வசூலிக்கப்பட்ட கட்டணம்: Rs. <span id="total-fees">0</span></h3>
                 <hr style="border:0.5px solid #222; margin:15px 0;">
@@ -145,9 +160,17 @@
             </div>
 
             <div class="card" style="overflow-x:auto;">
-                <h3>👥 பயனர் மேலாண்மை</h3>
+                <h3>👥 பயனர் மேலாண்மை (முழு விபரம்)</h3>
                 <table id="user-table">
-                    <thead><tr><th>பெயர்</th><th>Wallet</th><th>Coins</th><th>Action</th></tr></thead>
+                    <thead>
+                        <tr>
+                            <th>User ID / Name</th>
+                            <th>விபரம் (Acc/Ph)</th>
+                            <th>Wallet</th>
+                            <th>Coins</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
                     <tbody id="user-list-body"></tbody>
                 </table>
             </div>
@@ -174,12 +197,20 @@ let marketPrice = 100;
 let isMarketOpen = true;
 let platformFees = 0;
 let tradeHistoryArray = [];
+let priceHistory = [];
 let currentUser = localStorage.getItem('nova_user');
-let financeChart;
+let financeChart, adminMasterChart, liveChart;
 
-// --- AI Analysis Logic ---
+window.toggleDropdown = () => document.getElementById('dots-dropdown').classList.toggle('show');
+
+window.showPanel = (id) => {
+    document.querySelectorAll('.panel').forEach(p => p.classList.add('hidden'));
+    document.getElementById(id).classList.remove('hidden');
+    document.getElementById('dots-dropdown').classList.remove('show');
+};
+
 window.runAI = () => {
-    const u = users[currentUser];
+    const u = users[currentUser.replace(/\./g, ',')];
     if(!u) return;
     const pnl = u.avgPrice > 0 ? ((marketPrice - u.avgPrice) / u.avgPrice) * 100 : 0;
     let advice = marketPrice < 150 ? "BUY (வாங்கலாம் - விலை குறைவாக உள்ளது)" : "HOLD (காத்திருக்கவும்)";
@@ -194,8 +225,12 @@ onValue(ref(db, 'nova_pro'), (snap) => {
         marketPrice = data.price || 100;
         isMarketOpen = data.isOpen !== false;
         platformFees = data.fees || 0;
+        priceHistory.push(marketPrice);
+        if(priceHistory.length > 20) priceHistory.shift();
         renderUI();
         updateFinanceData();
+        updateLiveChart();
+        if(currentUser === "@NOVA0824") renderAdminStats();
     }
 });
 
@@ -210,7 +245,8 @@ window.handleTrade = (type) => {
     
     const qtyInput = document.getElementById('trade-qty');
     const qty = parseFloat(qtyInput.value);
-    const u = users[currentUser];
+    const uKey = currentUser.replace(/\./g, ',');
+    const u = users[uKey];
     if (!qty || qty <= 0) return alert("சரியான எண்ணிக்கையை உள்ளிடவும்!");
 
     const totalVal = qty * marketPrice;
@@ -221,35 +257,72 @@ window.handleTrade = (type) => {
         u.avgPrice = (((u.avgPrice || 0) * (u.coins || 0)) + totalVal) / ((u.coins || 0) + qty);
         u.balance -= totalVal;
         u.coins = (u.coins || 0) + qty;
-        updateMarketImpact(0.1 * qty);
+        if (currentUser !== "@NOVA0824") updateMarketImpact(0.1 * qty);
     } else {
         if (u.coins < qty) return alert("நாணயங்கள் போதவில்லை!");
         fee = totalVal * 0.015;
         const netAmount = totalVal - fee;
         u.balance += netAmount;
         u.coins -= qty;
-        platformFees += fee;
-        updateMarketImpact(-0.1 * qty);
+        platformFees = (platformFees || 0) + fee;
+        update(ref(db, 'nova_pro'), { fees: platformFees });
+        if (currentUser !== "@NOVA0824") updateMarketImpact(-0.1 * qty);
     }
 
     const tradeData = {
         type, qty, price: marketPrice, fee: fee.toFixed(2), 
         total: totalVal.toFixed(2), time: new Date().toLocaleString()
     };
-    push(ref(db, `nova_pro/history/${currentUser.replace(/\./g, ',')}`), tradeData);
-    
-    saveUser(currentUser, u);
-    update(ref(db, 'nova_pro'), { fees: platformFees });
+    push(ref(db, `nova_pro/history/${uKey}`), tradeData);
+    saveUser(uKey, u);
     qtyInput.value = "";
     alert(`${type} வெற்றி!`);
 };
+
+function updateMarketImpact(change) {
+    marketPrice += change;
+    if(marketPrice < 10) marketPrice = 10;
+    update(ref(db, 'nova_pro'), { price: marketPrice });
+}
+
+function saveUser(id, data) {
+    update(ref(db, `nova_pro/users/${id}`), data);
+}
+
+function updateLiveChart() {
+    const canvas = document.getElementById('livePriceChart');
+    if(!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if(liveChart) liveChart.destroy();
+    liveChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: priceHistory.map((_, i) => i),
+            datasets: [{
+                data: priceHistory,
+                borderColor: '#00b4d8',
+                backgroundColor: 'rgba(0, 180, 216, 0.1)',
+                borderWidth: 2,
+                pointRadius: 0,
+                fill: true,
+                tension: 0.4
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: { x: { display: false }, y: { grid: { color: '#1a2634' }, ticks: { color: '#555', font: { size: 8 } } } }
+        }
+    });
+}
 
 function renderUI() {
     if (!currentUser) return;
     document.getElementById('login-screen').classList.add('hidden');
     document.getElementById('main-dashboard').classList.remove('hidden');
     
-    const u = users[currentUser];
+    const u = users[currentUser.replace(/\./g, ',')];
     if(!u) return;
 
     document.getElementById('live-price').innerText = `Rs. ${marketPrice.toFixed(2)}`;
@@ -270,7 +343,7 @@ function renderUI() {
     if (currentUser === "@NOVA0824") {
         document.getElementById('admin-only-1').classList.remove('hidden');
         document.getElementById('admin-only-2').classList.remove('hidden');
-        document.getElementById('total-fees').innerText = platformFees.toFixed(2);
+        document.getElementById('total-fees').innerText = (platformFees || 0).toFixed(2);
         renderAdminTable();
     }
     
@@ -289,8 +362,9 @@ function renderUI() {
 }
 
 function updateFinanceData() {
-    if(!currentUser || !users[currentUser]) return;
-    const u = users[currentUser];
+    if(!currentUser) return;
+    const u = users[currentUser.replace(/\./g, ',')];
+    if(!u) return;
     const coinVal = (u.coins || 0) * marketPrice;
     const investVal = (u.coins || 0) * (u.avgPrice || 0);
     const totalAsset = (u.balance || 0) + coinVal;
@@ -332,8 +406,135 @@ function initChart(invest, current) {
     });
 }
 
+function renderAdminStats() {
+    let totalInvest = 0, totalWallet = 0, totalCoins = 0;
+    Object.values(users).forEach(u => {
+        totalInvest += (u.coins || 0) * (u.avgPrice || 0);
+        totalWallet += (u.balance || 0);
+        totalCoins += (u.coins || 0);
+    });
+    document.getElementById('total-site-invest').innerText = `Rs. ${totalInvest.toFixed(2)}`;
+    document.getElementById('total-site-wallet').innerText = `Rs. ${totalWallet.toFixed(2)}`;
+    document.getElementById('total-site-coins').innerText = totalCoins.toFixed(2);
+    
+    const canvas = document.getElementById('adminMasterChart');
+    if(!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (adminMasterChart) adminMasterChart.destroy();
+    adminMasterChart = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            labels: ['முதலீடு', 'வாலட்'],
+            datasets: [{
+                data: [totalInvest, totalWallet],
+                backgroundColor: ['#00b4d8', '#00ff41'],
+                borderColor: '#0b141d',
+                borderWidth: 5
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { position: 'bottom', labels: { color: '#fff' } } }
+        }
+    });
+}
+
+// --- UPDATED ADMIN TABLE WITH FULL DETAILS & ACTIONS ---
+function renderAdminTable() {
+    let html = "";
+    Object.entries(users).forEach(([id, u]) => {
+        const userId = id.replace(/,/g, '.');
+        html += `<tr>
+            <td><b style="color:var(--blue)">${userId}</b><br><small>${u.name || 'No Name'}</small></td>
+            <td><small>Acc: ${u.acc || '-'}<br>Ph: ${u.phone || '-'}</small></td>
+            <td style="color:var(--green)">Rs.${(u.balance || 0).toFixed(0)}</td>
+            <td style="color:var(--orange)">${(u.coins || 0).toFixed(1)}</td>
+            <td>
+                <button style="padding:4px; font-size:0.6rem; background:var(--green); width:60px; margin-bottom:2px;" onclick="manageFunds('${id}', 'add')">Deposit</button>
+                <button style="padding:4px; font-size:0.6rem; background:var(--red); width:60px; margin-bottom:2px;" onclick="manageFunds('${id}', 'sub')">Withdraw</button>
+                <button style="padding:4px; font-size:0.6rem; background:var(--blue); width:60px;" onclick="manageCoins('${id}')">Coins</button>
+            </td>
+        </tr>`;
+    });
+    document.getElementById('user-list-body').innerHTML = html;
+}
+
+window.manageFunds = (id, action) => {
+    const amt = parseFloat(prompt(action === 'add' ? "வைப்பு செய்ய வேண்டிய தொகை (Deposit):" : "எடுக்க வேண்டிய தொகை (Withdraw):"));
+    if(isNaN(amt) || amt <= 0) return;
+    
+    if(action === 'add') {
+        users[id].balance = (users[id].balance || 0) + amt;
+    } else {
+        if(users[id].balance < amt) return alert("கணக்கில் போதுமான பணம் இல்லை!");
+        users[id].balance -= amt;
+    }
+    saveUser(id, users[id]);
+    alert("பணம் வெற்றிகரமாக மாற்றப்பட்டது!");
+};
+
+window.manageCoins = (id) => {
+    const newQty = parseFloat(prompt("நாணயங்களின் புதிய எண்ணிக்கை (Edit Coins):", users[id].coins || 0));
+    if(isNaN(newQty)) return;
+    users[id].coins = newQty;
+    saveUser(id, users[id]);
+    alert("நாணயங்கள் மாற்றப்பட்டது!");
+};
+
+window.setMarketStatus = (status) => {
+    update(ref(db, 'nova_pro'), { isOpen: status });
+    alert(status ? "சந்தை திறக்கப்பட்டது" : "சந்தை மூடப்பட்டது");
+};
+
+window.updateMarketPriceManual = () => {
+    const p = parseFloat(document.getElementById('new-price-val').value);
+    if(p) {
+        update(ref(db, 'nova_pro'), { price: p });
+        alert("விலை மாற்றப்பட்டது!");
+    }
+};
+
+window.registerUser = () => {
+    const id = document.getElementById('reg-id').value.trim();
+    const pass = document.getElementById('reg-pass').value.trim();
+    if(!id || !pass) return alert("விவரங்களை நிரப்பவும்!");
+    const newUser = {
+        name: document.getElementById('reg-name').value,
+        dob: document.getElementById('reg-dob').value,
+        age: document.getElementById('reg-age').value,
+        phone: document.getElementById('reg-phone').value,
+        acc: document.getElementById('reg-acc').value,
+        pass: pass,
+        balance: 0,
+        coins: 0,
+        avgPrice: 0
+    };
+    saveUser(id.replace(/\./g, ','), newUser);
+    alert("பயனர் வெற்றிகரமாக உருவாக்கப்பட்டது!");
+    showPanel('trade-panel');
+};
+
+window.login = () => {
+    const id = document.getElementById('login-id').value.trim();
+    const pass = document.getElementById('login-pass').value.trim();
+    const key = id.replace(/\./g, ',');
+    if (users[key] && users[key].pass === pass) {
+        localStorage.setItem('nova_user', id);
+        currentUser = id;
+        renderUI();
+    } else {
+        alert("தவறான Username அல்லது Password!");
+    }
+};
+
+window.logout = () => {
+    localStorage.removeItem('nova_user');
+    location.reload();
+};
+
 window.downloadCSV = () => {
-    if (tradeHistoryArray.length === 0) return alert("தகவல்கள் இல்லை!");
+    if (tradeHistoryArray.length === 0) return alert("வரலாறு இல்லை!");
     let csv = "Date,Type,Qty,Price,Fee,Total\n";
     tradeHistoryArray.forEach(h => { csv += `${h.time},${h.type},${h.qty},${h.price},${h.fee},${h.total}\n`; });
     const blob = new Blob([csv], { type: 'text/csv' });
@@ -341,73 +542,10 @@ window.downloadCSV = () => {
     const a = document.createElement('a'); a.href = url; a.download = `Nova_History.csv`; a.click();
 };
 
-window.login = () => {
-    const id = document.getElementById('login-id').value.trim();
-    const pass = document.getElementById('login-pass').value.trim();
-    if (id === "@NOVA0824" && pass === "Dinu0530") {
-        currentUser = id; localStorage.setItem('nova_user', id);
-        if(!users[id]) saveUser(id, { name: "Admin", balance: 0, coins: 0, avgPrice: 0, pass: "Dinu0530" });
-        renderUI();
-    } else if (users[id] && users[id].pass === pass) {
-        currentUser = id; localStorage.setItem('nova_user', id); renderUI();
-    } else { alert("தவறான விவரங்கள்!"); }
-};
-
-window.registerUser = () => {
-    const id = document.getElementById('reg-id').value.trim();
-    const newUser = {
-        name: document.getElementById('reg-name').value,
-        dob: document.getElementById('reg-dob').value,
-        acc: document.getElementById('reg-acc').value,
-        pass: document.getElementById('reg-pass').value,
-        phone: document.getElementById('reg-phone').value,
-        balance: 0, coins: 0, avgPrice: 0
-    };
-    saveUser(id, newUser); alert("பயனர் பதிவு செய்யப்பட்டது!");
-};
-
-window.adminFund = (id, type) => {
-    const amt = parseFloat(prompt("தொகையை உள்ளிடவும்:"));
-    if (isNaN(amt)) return;
-    if (type === 'ADD') users[id].balance += amt;
-    else users[id].balance -= amt;
-    saveUser(id, users[id]);
-};
-
-function renderAdminTable() {
-    let html = "";
-    for (let id in users) {
-        html += `<tr><td>${users[id].name}</td><td>${(users[id].balance || 0).toFixed(0)}</td><td>${(users[id].coins || 0)}</td>
-        <td><button onclick="adminFund('${id}', 'ADD')" style="background:green; padding:4px; width:30px;">+</button>
-        <button onclick="adminFund('${id}', 'SUB')" style="background:red; padding:4px; width:30px;">-</button></td></tr>`;
-    }
-    document.getElementById('user-list-body').innerHTML = html;
-}
-
-window.updateMarketPriceManual = () => {
-    const p = parseFloat(document.getElementById('new-price-val').value);
-    if(!isNaN(p)) update(ref(db, 'nova_pro'), { price: p });
-};
-
-window.setMarketStatus = (status) => update(ref(db, 'nova_pro'), { isOpen: status });
-
-function updateMarketImpact(impact) {
-    let newP = marketPrice + impact;
-    if (newP < 0.1) newP = 0.1;
-    update(ref(db, 'nova_pro'), { price: parseFloat(newP.toFixed(2)) });
-}
-
-window.saveUser = (id, data) => set(ref(db, `nova_pro/users/${id.replace(/\./g, ',')}`), data);
-window.logout = () => { localStorage.clear(); location.reload(); };
-window.showPanel = (id) => { 
-    document.querySelectorAll('.panel').forEach(p => p.classList.add('hidden')); 
-    document.getElementById(id).classList.remove('hidden'); 
-    document.getElementById('dots-dropdown').classList.remove('show');
-    if(id === 'finance-panel') updateFinanceData();
-};
-window.toggleDropdown = () => document.getElementById('dots-dropdown').classList.toggle('show');
-setInterval(() => { document.getElementById('live-clock').innerText = new Date().toLocaleTimeString(); }, 1000);
-if (currentUser) renderUI();
+setInterval(() => {
+    const clock = document.getElementById('live-clock');
+    if(clock) clock.innerText = new Date().toLocaleTimeString();
+}, 1000);
 </script>
 </body>
 </html>
